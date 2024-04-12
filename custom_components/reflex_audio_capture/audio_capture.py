@@ -1,6 +1,8 @@
-"""Reflex custom component AudioCapture."""
+"""Cross-browser audio capture using audio-recorder-polyfill."""
 
-# For wrapping react guide, visit https://reflex.dev/docs/wrapping-react/overview/
+from __future__ import annotations
+
+from typing import List
 
 from jinja2 import Environment
 
@@ -8,44 +10,66 @@ import reflex as rx
 
 
 START_RECORDING_JS_TEMPLATE = """
-const handleDataAvailable = (e) => {
-    if (e.data.size > 0) {
-        var a = new FileReader();
-        a.onload = (e) => {
-            const _data = e.target.result
-            applyEvent({{ on_data_available_event }}, socket)
-        }
-        a.readAsDataURL(e.data);
+const [mediaRecorderState, setMediaRecorderState] = useState('unknown')
+refs['mediarecorder_state_{{ ref }}'] = mediaRecorderState
+refs['mediarecorder_start_{{ ref }}'] = useCallback(() => {
+    const mediaRecorderRef = refs['mediarecorder_{{ ref }}']
+    if (mediaRecorderRef !== undefined) {
+        console.log(mediaRecorderRef)
+        mediaRecorderRef.stop()
     }
-}
-const mediaRecorderRef = refs['mediarecorder_{{ ref }}']
-if (mediaRecorderRef !== undefined) {
-    console.log(mediaRecorderRef)
-    mediaRecorderRef.stop()
-}
-if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    navigator.mediaDevices.getUserMedia({audio: true})
-    // Success callback
-    .then((stream) => {
-        refs['mediarecorder_{{ ref }}'] = new MediaRecorder(stream)
-        const mediaRecorderRef = refs['mediarecorder_{{ ref }}']
-        mediaRecorderRef.addEventListener(
-            "dataavailable",
-            handleDataAvailable,
-        );
-        {{ on_start_callback }}
-        {{ on_stop_callback }}
-        mediaRecorderRef.start({{ timeslice }})
-    })
-    // Error callback
-    .catch((err) => {
-        const _error = `The following getUserMedia error occurred: $\{err}`
-        applyEvent({{ on_error_event }}, socket)
-    });
-} else {
-    const _error = "getUserMedia not supported on your browser!"
-    applyEvent({{ on_error_event }}, socket)
-}"""
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({audio: true})
+        // Success callback
+        .then(async (stream) => {
+            const AudioRecorder = (await import('audio-recorder-polyfill')).default
+            if ({{ use_mp3 }}) {
+                const mpegEncoder = (await import('audio-recorder-polyfill/mpeg-encoder')).default
+                AudioRecorder.encoder = mpegEncoder
+                AudioRecorder.prototype.mimeType = 'audio/mpeg'
+            }
+            refs['mediarecorder_{{ ref }}'] = new AudioRecorder(stream)
+            const mediaRecorderRef = refs['mediarecorder_{{ ref }}']
+            const updateState = () => {
+                console.log(mediaRecorderRef.state)
+                setMediaRecorderState(mediaRecorderRef.state)
+            }
+            mediaRecorderRef.addEventListener('stop', updateState)
+            mediaRecorderRef.addEventListener('start', updateState)
+            mediaRecorderRef.addEventListener('pause', updateState)
+            mediaRecorderRef.addEventListener('resume', updateState)
+            mediaRecorderRef.addEventListener('error', updateState)
+            mediaRecorderRef.addEventListener(
+                "dataavailable",
+                (e) => {
+                    console.log("data available", e.data.size)
+                    if (e.data.size > 0) {
+                        var a = new FileReader();
+                        a.onload = (e) => {
+                            const _data = e.target.result
+                            {{ on_data_available }}
+                        }
+                        a.readAsDataURL(e.data);
+                    }
+                }
+            );
+            {{ on_start_callback }}
+            {{ on_stop_callback }}
+            {{ on_error_callback }}
+            addEventListener('beforeunload', () => {mediaRecorderRef.stop()})
+            mediaRecorderRef.start({{ timeslice }})
+            console.log(mediaRecorderRef)
+        })
+        // Error callback
+        .catch((err) => {
+            const _error = "The following getUserMedia error occurred: " + err
+            {{ on_error }}
+        });
+    } else {
+        const _error = "getUserMedia not supported on your browser!"
+        {{ on_error }}
+    }
+})"""
 
 
 def get_codec(data_uri) -> str | None:
@@ -65,118 +89,140 @@ def strip_codec_part(data_uri: str) -> str:
     return ";".join(parts)
 
 
-def combine_audio_chunks(chunks: list[str]) -> str:
-    data_uri_portion = chunks[0].partition(",")[0]
-    data_chunks = [chunk.partition(",")[2] for chunk in chunks]
-    return data_uri_portion + "," + "".join(data_chunks)
+class AudioRecorderPolyfill(rx.Component):
+    """A cross-browser component for recording MP3 Audio.
 
+    Usage:
+      - First create an instance of the component, setting event trigger callbacks.
+      - Include the instance in a page (it is invisible).
+      - Use the `start` and `stop` methods as event handlers to control recording.
+      - Use the `is_recording` property to check if recording is in progress.
 
-def start_audio_recording(
-    ref: str,
-    on_data_available: rx.event.EventHandler,
-    on_start: rx.event.EventHandler = None,
-    on_stop: rx.event.EventHandler = None,
-    on_error: rx.event.EventHandler = None,
-    timeslice: str = "",
-) -> str:
-    """Helper to start recording a video from a webcam component.
-    Args:
-        handler: The event handler that receives the video chunk by chunk.
-        timeslice: How often to emit a chunk. Defaults to "" which means only at the end.
-    Returns:
-        The ref of the media recorder to stop recording.
+    If you want to control the start/stop from within a backend event handler, you
+    can create the instance and assign it to a module level global that is accessible
+    from the State class.
+
+    ```python
+    def index() -> rx.Component:
+        capture = AudioRecorderPolyfill.create(
+            id="my_audio_recorder",
+            on_data_available=State.on_data_available,
+            on_error=State.on_error,
+            timeslice=State.timeslice,
+        )
+        return rx.vstack(
+            capture,
+            rx.cond(
+                capture.is_recording,
+                rx.button("Stop Recording", on_click=capture.stop),
+                rx.button("Start Recording", on_click=capture.start),
+            ),
+        )
+    ```
     """
-    on_data_available_event = rx.utils.format.format_event(
-        rx.event.call_event_handler(on_data_available, arg_spec=lambda data: [data])
-    )
-    if on_start is not None:
-        on_start_event = rx.utils.format.format_event(
-            rx.event.call_event_handler(on_start, arg_spec=lambda e: [])
+
+    lib_dependencies: List[str] = ["audio-recorder-polyfill"]
+
+    on_data_available: rx.EventHandler[lambda data: [data]]
+    on_start: rx.EventHandler
+    on_stop: rx.EventHandler
+    on_error: rx.EventHandler[lambda error: [error]]
+    timeslice: rx.Var[int]
+    use_mp3: rx.Var[bool] = True
+
+    @classmethod
+    def create(cls, *children, **props) -> rx.Component:
+        props.setdefault("id", rx.vars.get_unique_variable_name())
+        return super().create(*children, **props)
+
+    def render(self) -> dict:
+        return {}
+
+    def _get_imports(self):
+        return rx.utils.imports.merge_imports(
+            super()._get_imports(),
+            {
+                "react": [
+                    rx.utils.imports.ImportVar(tag="useCallback"),
+                    rx.utils.imports.ImportVar(tag="useState"),
+                ],
+            },
         )
-        on_start_callback = f"mediaRecorderRef.addEventListener('start', () => applyEvent({on_start_event}, socket))"
-    else:
-        on_start_callback = ""
 
-    if on_stop is not None:
-        on_stop_event = rx.utils.format.format_event(
-            rx.event.call_event_handler(on_stop, arg_spec=lambda e: [])
+    def _get_hooks(self) -> str:
+        on_data_available = self.event_triggers.get("on_data_available")
+        if isinstance(on_data_available, rx.EventChain):
+            on_data_available = rx.utils.format.format_event_chain(on_data_available)
+
+        on_start = self.event_triggers.get("on_start")
+        if isinstance(on_start, rx.EventChain):
+            on_start = rx.utils.format.wrap(
+                rx.utils.format.format_prop(on_start).strip("{}"),
+                "(",
+            )
+        if on_start is not None:
+            on_start_callback = (
+                f"mediaRecorderRef.addEventListener('start', {on_start})"
+            )
+        else:
+            on_start_callback = ""
+
+        on_stop = self.event_triggers.get("on_stop")
+        if isinstance(on_stop, rx.EventChain):
+            on_stop = rx.utils.format.wrap(
+                rx.utils.format.format_prop(on_stop).strip("{}"),
+                "(",
+            )
+        if on_stop is not None:
+            on_stop_callback = "\n".join(
+                [
+                    f"mediaRecorderRef.addEventListener('stop', {on_stop})",
+                    f"addEventListener('beforeunload', {on_stop})",
+                ],
+            )
+        else:
+            on_stop_callback = ""
+
+        on_error = self.event_triggers.get("on_error")
+        if isinstance(on_error, rx.EventChain):
+            on_error = rx.utils.format.format_event_chain(on_error)
+        if on_error is None:
+            on_error = "console.log(_error)"
+        on_error_callback = (
+            f"mediaRecorderRef.addEventListener('error', (_error) => {on_error})"
         )
-        on_stop_callback = "\n".join(
-            [
-                f"mediaRecorderRef.addEventListener('stop', () => applyEvent({on_stop_event}, socket))",
-                f"addEventListener('beforeunload', () => applyEvent({on_stop_event}, socket))"
-            ],
+
+        return (
+            Environment()
+            .from_string(START_RECORDING_JS_TEMPLATE)
+            .render(
+                ref=self.get_ref(),
+                on_data_available=on_data_available,
+                on_start_callback=on_start_callback,
+                on_stop_callback=on_stop_callback,
+                on_error_callback=on_error_callback,
+                on_error=on_error,
+                timeslice=str(rx.cond(self.timeslice, self.timeslice, "")).strip("{}"),
+                use_mp3=self.use_mp3,
+            )
         )
-    else:
-        on_stop_callback = ""
-    if on_error is not None:
-        on_error_event = rx.utils.format.format_event(
-            rx.event.call_event_handler(on_error, arg_spec=lambda error: [error])
-        )
-    else:
-        on_error_event = 'Event("_console", {message: _error})'
 
-    script = Environment().from_string(START_RECORDING_JS_TEMPLATE).render(
-        ref=ref,
-        on_data_available_event=on_data_available_event,
-        on_start_callback=on_start_callback,
-        on_stop_callback=on_stop_callback,
-        on_error_event=on_error_event,
-        timeslice=timeslice,
-    )
-    print(script)
-    return rx.call_script(script)
+    def start(self):
+        return rx.call_script(f"refs['mediarecorder_start_{self.get_ref()}']()")
 
-    return rx.call_script(
-        f"""
-        const handleDataAvailable = (e) => {{
-            if (e.data.size > 0) {{
-                var a = new FileReader();
-                a.onload = (e) => {{
-                    const _data = e.target.result
-                    applyEvent({on_data_available_event}, socket)
-                }}
-                a.readAsDataURL(e.data);
-            }}
-        }}
-        const mediaRecorderRef = refs['mediarecorder_{ref}']
-        if (mediaRecorderRef !== undefined) {{
-            console.log(mediaRecorderRef)
-            mediaRecorderRef.stop()
-        }}
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {{
-            navigator.mediaDevices.getUserMedia({{audio: true}})
-            // Success callback
-            .then((stream) => {{
-                refs['mediarecorder_{ref}'] = new MediaRecorder(stream)
-                const mediaRecorderRef = refs['mediarecorder_{ref}']
-                mediaRecorderRef.addEventListener(
-                    "dataavailable",
-                    handleDataAvailable,
-                );
-                {on_start_callback}
-                {on_stop_callback}
-                mediaRecorderRef.start({timeslice})
-            }})
-            // Error callback
-            .catch((err) => {{
-                console.error("The following getUserMedia error occurred", err);
-            }});
-        }} else {{
-            console.log("getUserMedia not supported on your browser!");
-        }}""",
-    )
+    def stop(self):
+        return rx.call_script(f"refs['mediarecorder_{self.get_ref()}'].stop()")
 
+    @property
+    def is_recording(self) -> rx.Var[bool]:
+        return rx.Var.create(
+            f"(refs['mediarecorder_state_{self.get_ref()}'] === 'recording')",
+            _var_is_local=False,
+        ).to(bool)
 
-def stop_audio_recording(ref: str):
-    """Helper to stop recording a video from a webcam component.
-    Args:
-        ref: The ref of the webcam component.
-        handler: The event handler that receives the video blob.
-    """
-    return rx.call_script(f"""
-        const mediaRecorderRef = refs['mediarecorder_{ref}']
-        if (mediaRecorderRef !== undefined) {{
-            mediaRecorderRef.stop()
-        }}"""
-    )
+    @property
+    def recorder_state(self) -> rx.Var[str]:
+        return rx.Var.create(
+            f"(refs['mediarecorder_state_{self.get_ref()}'])",
+            _var_is_local=False,
+        ).to(str)
