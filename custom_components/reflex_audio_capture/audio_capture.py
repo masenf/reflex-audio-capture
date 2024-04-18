@@ -9,17 +9,28 @@ from jinja2 import Environment
 import reflex as rx
 
 
+class MediaDeviceInfo(rx.Base):
+    """A media device info object."""
+
+    kind: str
+    label: str
+    deviceId: str
+    groupId: str
+
+
 START_RECORDING_JS_TEMPLATE = """
 const [mediaRecorderState, setMediaRecorderState] = useState('unknown')
 refs['mediarecorder_state_{{ ref }}'] = mediaRecorderState
+const [mediaDevices, setMediaDevices] = useState([])
+refs['mediadevices_{{ ref }}'] = mediaDevices
 refs['mediarecorder_start_{{ ref }}'] = useCallback(() => {
     const mediaRecorderRef = refs['mediarecorder_{{ ref }}']
     if (mediaRecorderRef !== undefined) {
-        console.log(mediaRecorderRef)
         mediaRecorderRef.stop()
     }
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        navigator.mediaDevices.getUserMedia({audio: true})
+        const device_id = ({{ device_id }} ? {deviceId: {{ device_id }}} : true)
+        navigator.mediaDevices.getUserMedia({audio: device_id})
         // Success callback
         .then(async (stream) => {
             const AudioRecorder = (await import('audio-recorder-polyfill')).default
@@ -31,7 +42,6 @@ refs['mediarecorder_start_{{ ref }}'] = useCallback(() => {
             refs['mediarecorder_{{ ref }}'] = new AudioRecorder(stream)
             const mediaRecorderRef = refs['mediarecorder_{{ ref }}']
             const updateState = () => {
-                console.log(mediaRecorderRef.state)
                 setMediaRecorderState(mediaRecorderRef.state)
             }
             mediaRecorderRef.addEventListener('stop', updateState)
@@ -42,7 +52,6 @@ refs['mediarecorder_start_{{ ref }}'] = useCallback(() => {
             mediaRecorderRef.addEventListener(
                 "dataavailable",
                 (e) => {
-                    console.log("data available", e.data.size)
                     if (e.data.size > 0) {
                         var a = new FileReader();
                         a.onload = (e) => {
@@ -58,7 +67,7 @@ refs['mediarecorder_start_{{ ref }}'] = useCallback(() => {
             {{ on_error_callback }}
             addEventListener('beforeunload', () => {mediaRecorderRef.stop()})
             mediaRecorderRef.start({{ timeslice }})
-            console.log(mediaRecorderRef)
+            console.log(mediaRecorderRef, device_id)
         })
         // Error callback
         .catch((err) => {
@@ -69,7 +78,25 @@ refs['mediarecorder_start_{{ ref }}'] = useCallback(() => {
         const _error = "getUserMedia not supported on your browser!"
         {{ on_error }}
     }
-})"""
+})
+// Enumerate devices and set the state
+useEffect(() => {
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    const _error = "enumerateDevices() not supported on your browser!"
+    {{ on_error }}
+  } else {
+    navigator.mediaDevices
+      .enumerateDevices()
+      .then((devices) => {
+        setMediaDevices(devices)
+      })
+      .catch((err) => {
+        const _error = err.name + ": " + err.message;
+        {{ on_error }}
+      });
+  }
+}, [])
+"""
 
 
 def get_codec(data_uri) -> str | None:
@@ -128,6 +155,7 @@ class AudioRecorderPolyfill(rx.Component):
     on_stop: rx.EventHandler
     on_error: rx.EventHandler[lambda error: [error]]
     timeslice: rx.Var[int]
+    device_id: rx.Var[str]
     use_mp3: rx.Var[bool] = True
 
     @classmethod
@@ -144,6 +172,7 @@ class AudioRecorderPolyfill(rx.Component):
             {
                 "react": [
                     rx.utils.imports.ImportVar(tag="useCallback"),
+                    rx.utils.imports.ImportVar(tag="useEffect"),
                     rx.utils.imports.ImportVar(tag="useState"),
                 ],
             },
@@ -203,7 +232,10 @@ class AudioRecorderPolyfill(rx.Component):
                 on_error_callback=on_error_callback,
                 on_error=on_error,
                 timeslice=str(rx.cond(self.timeslice, self.timeslice, "")).strip("{}"),
-                use_mp3=self.use_mp3,
+                device_id=self.device_id._var_name_unwrapped
+                if self.device_id is not None
+                else "undefined",
+                use_mp3=self.use_mp3._var_name_unwrapped,
             )
         )
 
@@ -226,3 +258,10 @@ class AudioRecorderPolyfill(rx.Component):
             f"(refs['mediarecorder_state_{self.get_ref()}'])",
             _var_is_local=False,
         ).to(str)
+
+    @property
+    def media_devices(self) -> rx.Var[List[MediaDeviceInfo]]:
+        return rx.Var.create(
+            f"(refs['mediadevices_{self.get_ref()}'])",
+            _var_is_local=False,
+        ).to(List[MediaDeviceInfo])

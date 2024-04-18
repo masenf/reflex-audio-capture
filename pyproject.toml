@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reflex-audio-capture"
-version = "0.0.1"
+version = "0.0.2"
 description = "Experimental audio-recorder-polyfill component"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -12,7 +12,7 @@ requires-python = ">=3.8"
 authors = [{ name = "Masen Furer", email = "m_github@0x26.net" }]
 keywords = ["reflex","reflex-custom-components"]
 
-dependencies = ["reflex>=0.4.8a"]
+dependencies = ["reflex>=0.4.8"]
 
 classifiers = ["Development Status :: 4 - Beta"]
 
