@@ -46,6 +46,10 @@ class State(rx.State):
     def set_timeslice(self, value):
         self.timeslice = value[0]
 
+    def set_device_id(self, value):
+        self.device_id = value
+        yield capture.stop()
+
     def on_error(self, err):
         print(err)
 
@@ -93,7 +97,10 @@ def index() -> rx.Component:
                         value=[State.timeslice],
                         on_change=State.set_timeslice,
                     ),
-                    input_device_select(),
+                    rx.cond(
+                        capture.media_devices,
+                        input_device_select(),
+                    ),
                 ),
             ),
             capture,

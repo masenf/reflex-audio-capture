@@ -23,6 +23,22 @@ const [mediaRecorderState, setMediaRecorderState] = useState('unknown')
 refs['mediarecorder_state_{{ ref }}'] = mediaRecorderState
 const [mediaDevices, setMediaDevices] = useState([])
 refs['mediadevices_{{ ref }}'] = mediaDevices
+const updateMediaDevices = () => {
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    const _error = "enumerateDevices() not supported on your browser!"
+    {{ on_error }}
+  } else {
+    navigator.mediaDevices
+      .enumerateDevices()
+      .then((devices) => {
+        setMediaDevices(devices.filter((device) => device.deviceId && device.kind === "audioinput"))
+      })
+      .catch((err) => {
+        const _error = err.name + ": " + err.message;
+        {{ on_error }}
+      });
+  }
+}
 refs['mediarecorder_start_{{ ref }}'] = useCallback(() => {
     const mediaRecorderRef = refs['mediarecorder_{{ ref }}']
     if (mediaRecorderRef !== undefined) {
@@ -33,6 +49,10 @@ refs['mediarecorder_start_{{ ref }}'] = useCallback(() => {
         navigator.mediaDevices.getUserMedia({audio: device_id})
         // Success callback
         .then(async (stream) => {
+            if (mediaDevices.length === 0) {
+                // update device list after permission is granted
+                updateMediaDevices()
+            }
             const AudioRecorder = (await import('audio-recorder-polyfill')).default
             if ({{ use_mp3 }}) {
                 const mpegEncoder = (await import('audio-recorder-polyfill/mpeg-encoder')).default
@@ -80,22 +100,7 @@ refs['mediarecorder_start_{{ ref }}'] = useCallback(() => {
     }
 })
 // Enumerate devices and set the state
-useEffect(() => {
-  if (!navigator.mediaDevices?.enumerateDevices) {
-    const _error = "enumerateDevices() not supported on your browser!"
-    {{ on_error }}
-  } else {
-    navigator.mediaDevices
-      .enumerateDevices()
-      .then((devices) => {
-        setMediaDevices(devices)
-      })
-      .catch((err) => {
-        const _error = err.name + ": " + err.message;
-        {{ on_error }}
-      });
-  }
-}, [])
+useEffect(updateMediaDevices, [])
 """
 
 
