@@ -248,13 +248,14 @@ class AudioRecorderPolyfill(rx.Component):
         return rx.call_script(f"refs['mediarecorder_start_{self.get_ref()}']()")
 
     def stop(self):
-        return rx.call_script(f"refs['mediarecorder_{self.get_ref()}'].stop()")
+        return rx.call_script(f"refs['mediarecorder_{self.get_ref()}']?.stop()")
 
     @property
     def is_recording(self) -> rx.Var[bool]:
         return rx.Var.create(
             f"(refs['mediarecorder_state_{self.get_ref()}'] === 'recording')",
             _var_is_local=False,
+            _var_is_string=False,
         ).to(bool)
 
     @property
@@ -262,6 +263,7 @@ class AudioRecorderPolyfill(rx.Component):
         return rx.Var.create(
             f"(refs['mediarecorder_state_{self.get_ref()}'])",
             _var_is_local=False,
+            _var_is_string=False,
         ).to(str)
 
     @property
@@ -269,4 +271,5 @@ class AudioRecorderPolyfill(rx.Component):
         return rx.Var.create(
             f"(refs['mediadevices_{self.get_ref()}'])",
             _var_is_local=False,
+            _var_is_string=False,
         ).to(List[MediaDeviceInfo])
