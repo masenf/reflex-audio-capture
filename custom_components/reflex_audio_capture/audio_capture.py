@@ -75,8 +75,8 @@ refs['mediarecorder_start_{{ ref }}'] = useCallback(() => {
                     if (e.data.size > 0) {
                         var a = new FileReader();
                         a.onload = (e) => {
-                            const _data = e.target.result
-                            {{ on_data_available }}
+                            const _data = e.target.result;
+                            {{ on_data_available }};
                         }
                         a.readAsDataURL(e.data);
                     }
