@@ -248,7 +248,15 @@ class AudioRecorderPolyfill(rx.Component):
         return rx.call_script(f"refs['mediarecorder_start_{self.get_ref()}']()")
 
     def stop(self):
-        return rx.call_script(f"refs['mediarecorder_{self.get_ref()}']?.stop()")
+        return rx.call_script(
+            f"""
+            const mediaRecorderRef = refs['mediarecorder_{self.get_ref()}'];
+            if (mediaRecorderRef) {{
+                mediaRecorderRef.stop();
+                mediaRecorderRef.stream.getAudioTracks().forEach(track => track.stop());
+            }}
+            """
+        )
 
     @property
     def is_recording(self) -> rx.Var[bool]:
