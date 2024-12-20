@@ -71,14 +71,14 @@ refs['mediarecorder_start_{{ ref }}'] = useCallback(() => {
             mediaRecorderRef.addEventListener('error', updateState)
             mediaRecorderRef.addEventListener(
                 "dataavailable",
-                (e) => {
+                async (e) => {
                     if (e.data.size > 0) {
-                        var a = new FileReader();
-                        a.onload = (e) => {
-                            const _data = e.target.result;
-                            {{ on_data_available }};
-                        }
-                        a.readAsDataURL(e.data);
+                        const reader = new FileReader();
+                        reader.onload = async function() {
+                            const base64data = reader.result;
+                            await {{ on_data_available }}(base64data);
+                        };
+                        reader.readAsDataURL(e.data);
                     }
                 }
             );
