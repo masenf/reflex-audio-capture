@@ -5,6 +5,7 @@ import reflex as rx
 from reflex_audio_capture import AudioRecorderPolyfill, get_codec, strip_codec_part
 
 from openai import AsyncOpenAI
+from reflex_intersection_observer import intersection_observer
 
 client = AsyncOpenAI()
 
@@ -21,6 +22,7 @@ class State(rx.State):
     device_id: str = ""
     use_mp3: bool = True
 
+    @rx.event(background=True)
     async def on_data_available(self, chunk: str):
         mime_type, _, codec = get_codec(chunk).partition(";")
         audio_type = mime_type.partition("/")[2]
@@ -29,30 +31,37 @@ class State(rx.State):
         print(len(chunk), mime_type, codec, audio_type)
         with urlopen(strip_codec_part(chunk)) as audio_data:
             try:
-                self.processing = True
-                yield
+                async with self:
+                    self.processing = True
                 transcription = await client.audio.transcriptions.create(
                     model="whisper-1",
                     file=("temp." + audio_type, audio_data.read(), mime_type),
                 )
-            except Exception as e:
-                self.has_error = True
+            except Exception:
+                async with self:
+                    self.has_error = True
                 yield capture.stop()
                 raise
             finally:
-                self.processing = False
-            self.transcript.append(transcription.text)
+                async with self:
+                    self.processing = False
+            async with self:
+                self.transcript.append(transcription.text)
 
+    @rx.event
     def set_timeslice(self, value):
         self.timeslice = value[0]
 
+    @rx.event
     def set_device_id(self, value):
         self.device_id = value
         yield capture.stop()
 
+    @rx.event
     def on_error(self, err):
         print(err)
 
+    @rx.event
     def on_load(self):
         # We can start the recording immediately when the page loads
         return capture.start()
@@ -68,7 +77,7 @@ capture = AudioRecorderPolyfill.create(
 )
 
 
-def input_device_select():
+def input_device_select() -> rx.Component:
     return rx.select.root(
         rx.select.trigger(placeholder="Select Input Device"),
         rx.select.content(
@@ -81,6 +90,25 @@ def input_device_select():
             ),
         ),
         on_change=State.set_device_id,
+    )
+
+
+def transcript() -> rx.Component:
+    return rx.scroll_area(
+        rx.vstack(
+            rx.foreach(State.transcript, rx.text),
+            intersection_observer(
+                height="1px",
+                id="end-of-transcript",
+                root="#scroller",
+                # Remove lambda after reflex-dev/reflex#4552
+                on_non_intersect=lambda _: rx.scroll_to("end-of-transcript"),
+                visibility="hidden",
+            ),
+        ),
+        id="scroller",
+        width="100%",
+        height="50vh",
     )
 
 
@@ -114,20 +142,23 @@ def index() -> rx.Component:
                 ),
             ),
             rx.card(
-                rx.text("Transcript"),
+                rx.hstack(
+                    rx.text("Transcript"),
+                    rx.spinner(loading=State.processing),
+                    rx.spacer(),
+                    rx.icon_button(
+                        "trash-2",
+                        on_click=State.set_transcript([]),
+                        margin_bottom="4px",
+                    ),
+                    align="center",
+                ),
                 rx.divider(),
-                rx.foreach(
-                    State.transcript,
-                    rx.text,
-                ),
-                rx.cond(
-                    State.processing,
-                    rx.text("..."),
-                ),
+                transcript(),
             ),
             style={"width": "100%", "> *": {"width": "100%"}},
         ),
-        size="1",
+        size="2",
         margin_y="2em",
     )
 

@@ -1,3 +1,4 @@
-reflex>=0.4.8a
+reflex>=0.6.6
 reflex-audio-capture
+reflex-intersection-observer
 openai

@@ -75,8 +75,7 @@ refs['mediarecorder_start_{{ ref }}'] = useCallback(() => {
                     if (e.data.size > 0) {
                         var a = new FileReader();
                         a.onload = (e) => {
-                            const _data = e.target.result;
-                            {{ on_data_available }};
+                            {{ on_data_available }}(e.target.result);
                         }
                         a.readAsDataURL(e.data);
                     }
@@ -121,6 +120,14 @@ def strip_codec_part(data_uri: str) -> str:
     return ";".join(parts)
 
 
+def _on_data_available_signature(data: rx.Var[str]) -> tuple[rx.Var[str]]:
+    return (data,)
+
+
+def _on_error_signature(error: rx.Var[dict]) -> tuple[rx.Var[dict]]:
+    return (error,)
+
+
 class AudioRecorderPolyfill(rx.Component):
     """A cross-browser component for recording MP3 Audio.
 
@@ -155,13 +162,13 @@ class AudioRecorderPolyfill(rx.Component):
 
     lib_dependencies: List[str] = ["audio-recorder-polyfill"]
 
-    on_data_available: rx.EventHandler[lambda data: [data]]
-    on_start: rx.EventHandler
-    on_stop: rx.EventHandler
-    on_error: rx.EventHandler[lambda error: [error]]
+    on_data_available: rx.EventHandler[_on_data_available_signature]
+    on_start: rx.EventHandler[rx.event.no_args_event_spec]
+    on_stop: rx.EventHandler[rx.event.no_args_event_spec]
+    on_error: rx.EventHandler[_on_error_signature]
     timeslice: rx.Var[int]
     device_id: rx.Var[str]
-    use_mp3: rx.Var[bool] = True
+    use_mp3: rx.Var[bool] = rx.Var.create(True)
 
     @classmethod
     def create(cls, *children, **props) -> rx.Component:
@@ -171,47 +178,38 @@ class AudioRecorderPolyfill(rx.Component):
     def render(self) -> dict:
         return {}
 
-    def _get_imports(self):
-        return rx.utils.imports.merge_imports(
-            super()._get_imports(),
-            {
-                "react": [
-                    rx.utils.imports.ImportVar(tag="useCallback"),
-                    rx.utils.imports.ImportVar(tag="useEffect"),
-                    rx.utils.imports.ImportVar(tag="useState"),
-                ],
-            },
-        )
+    def add_imports(self) -> rx.ImportDict:
+        return {
+            "react": [
+                "useCallback",
+                "useEffect",
+                "useState",
+            ]
+        }
 
-    def _get_hooks(self) -> str:
+    def add_hooks(self) -> list[str]:
         on_data_available = self.event_triggers.get("on_data_available")
         if isinstance(on_data_available, rx.EventChain):
-            on_data_available = rx.utils.format.format_event_chain(on_data_available)
+            on_data_available = rx.Var.create(on_data_available)
 
         on_start = self.event_triggers.get("on_start")
         if isinstance(on_start, rx.EventChain):
-            on_start = rx.utils.format.wrap(
-                rx.utils.format.format_prop(on_start).strip("{}"),
-                "(",
-            )
+            on_start = rx.Var.create(on_start)
         if on_start is not None:
             on_start_callback = (
-                f"mediaRecorderRef.addEventListener('start', {on_start})"
+                f"mediaRecorderRef.addEventListener('start', {on_start!s})"
             )
         else:
             on_start_callback = ""
 
         on_stop = self.event_triggers.get("on_stop")
         if isinstance(on_stop, rx.EventChain):
-            on_stop = rx.utils.format.wrap(
-                rx.utils.format.format_prop(on_stop).strip("{}"),
-                "(",
-            )
+            on_stop = rx.Var.create(on_stop)
         if on_stop is not None:
             on_stop_callback = "\n".join(
                 [
-                    f"mediaRecorderRef.addEventListener('stop', {on_stop})",
-                    f"addEventListener('beforeunload', {on_stop})",
+                    f"mediaRecorderRef.addEventListener('stop', {on_stop!s})",
+                    f"addEventListener('beforeunload', {on_stop!s})",
                 ],
             )
         else:
@@ -219,14 +217,12 @@ class AudioRecorderPolyfill(rx.Component):
 
         on_error = self.event_triggers.get("on_error")
         if isinstance(on_error, rx.EventChain):
-            on_error = rx.utils.format.format_event_chain(on_error)
+            on_error = rx.Var.create(on_error)
         if on_error is None:
             on_error = "console.log(_error)"
-        on_error_callback = (
-            f"mediaRecorderRef.addEventListener('error', (_error) => {on_error})"
-        )
+        on_error_callback = f"mediaRecorderRef.addEventListener('error', {on_error!s})"
 
-        return (
+        return [
             Environment()
             .from_string(START_RECORDING_JS_TEMPLATE)
             .render(
@@ -237,12 +233,12 @@ class AudioRecorderPolyfill(rx.Component):
                 on_error_callback=on_error_callback,
                 on_error=on_error,
                 timeslice=str(rx.cond(self.timeslice, self.timeslice, "")).strip("{}"),
-                device_id=self.device_id._var_name_unwrapped
+                device_id=str(self.device_id)
                 if self.device_id is not None
                 else "undefined",
-                use_mp3=self.use_mp3._var_name_unwrapped,
+                use_mp3=str(self.use_mp3),
             )
-        )
+        ]
 
     def start(self):
         return rx.call_script(f"refs['mediarecorder_start_{self.get_ref()}']()")
@@ -260,24 +256,21 @@ class AudioRecorderPolyfill(rx.Component):
 
     @property
     def is_recording(self) -> rx.Var[bool]:
-        return rx.Var.create(
+        return rx.Var(
             f"(refs['mediarecorder_state_{self.get_ref()}'] === 'recording')",
-            _var_is_local=False,
-            _var_is_string=False,
-        ).to(bool)
+            _var_type=bool,
+        )
 
     @property
     def recorder_state(self) -> rx.Var[str]:
-        return rx.Var.create(
+        return rx.Var(
             f"(refs['mediarecorder_state_{self.get_ref()}'])",
-            _var_is_local=False,
-            _var_is_string=False,
-        ).to(str)
+            _var_type=str,
+        )
 
     @property
     def media_devices(self) -> rx.Var[List[MediaDeviceInfo]]:
-        return rx.Var.create(
+        return rx.Var(
             f"(refs['mediadevices_{self.get_ref()}'])",
-            _var_is_local=False,
-            _var_is_string=False,
-        ).to(List[MediaDeviceInfo])
+            _var_type=List[MediaDeviceInfo],
+        )
