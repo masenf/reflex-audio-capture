@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install package
-        run: pip install .
+        run: pip install . reflex>=0.7.0a3
       - name: Publish to PyPI
         if: ${{ env.HAS_PYPI_TOKEN == 'true' }}
         run: reflex component publish -t ${{ secrets.PYPI_TOKEN }} --no-share --no-validate-project-info
