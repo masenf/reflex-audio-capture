@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import List
-
-from jinja2 import Environment
+from typing import List, cast
 
 import reflex as rx
+from jinja2 import Environment
 
 
 class MediaDeviceInfo(rx.Base):
@@ -14,8 +13,8 @@ class MediaDeviceInfo(rx.Base):
 
     kind: str
     label: str
-    deviceId: str
-    groupId: str
+    deviceId: str  # noqa: N815
+    groupId: str  # noqa: N815
 
 
 START_RECORDING_JS_TEMPLATE = """
@@ -103,9 +102,9 @@ useEffect(updateMediaDevices, [])
 """
 
 
-def get_codec(data_uri) -> str | None:
+def get_codec(data_uri) -> str:
     if not data_uri.startswith("data:"):
-        return None
+        return ""
     colon_index = data_uri.find(":")
     end_index = data_uri.find(";base64,")
     return data_uri[colon_index + 1 : end_index]
@@ -171,9 +170,9 @@ class AudioRecorderPolyfill(rx.Component):
     use_mp3: rx.Var[bool] = rx.Var.create(True)
 
     @classmethod
-    def create(cls, *children, **props) -> rx.Component:
+    def create(cls, *children, **props) -> AudioRecorderPolyfill:
         props.setdefault("id", rx.vars.get_unique_variable_name())
-        return super().create(*children, **props)
+        return cast(AudioRecorderPolyfill, super().create(*children, **props))
 
     def render(self) -> dict:
         return {}
@@ -187,7 +186,7 @@ class AudioRecorderPolyfill(rx.Component):
             ]
         }
 
-    def add_hooks(self) -> list[str]:
+    def add_hooks(self) -> list[str | rx.Var]:
         on_data_available = self.event_triggers.get("on_data_available")
         if isinstance(on_data_available, rx.EventChain):
             on_data_available = rx.Var.create(on_data_available)

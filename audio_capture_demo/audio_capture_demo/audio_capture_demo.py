@@ -1,10 +1,8 @@
 from urllib.request import urlopen
 
 import reflex as rx
-
-from reflex_audio_capture import AudioRecorderPolyfill, get_codec, strip_codec_part
-
 from openai import AsyncOpenAI
+from reflex_audio_capture import AudioRecorderPolyfill, get_codec, strip_codec_part
 from reflex_intersection_observer import intersection_observer
 
 client = AsyncOpenAI()
@@ -28,7 +26,6 @@ class State(rx.State):
         audio_type = mime_type.partition("/")[2]
         if audio_type == "mpeg":
             audio_type = "mp3"
-        print(len(chunk), mime_type, codec, audio_type)
         with urlopen(strip_codec_part(chunk)) as audio_data:
             try:
                 async with self:
@@ -49,17 +46,21 @@ class State(rx.State):
                 self.transcript.append(transcription.text)
 
     @rx.event
-    def set_timeslice(self, value):
-        self.timeslice = value[0]
+    def set_transcript(self, value: list[str]):
+        self.transcript = value
 
     @rx.event
-    def set_device_id(self, value):
+    def set_timeslice(self, value: list[int | float]):
+        self.timeslice = int(value[0])
+
+    @rx.event
+    def set_device_id(self, value: str):
         self.device_id = value
         yield capture.stop()
 
     @rx.event
     def on_error(self, err):
-        print(err)
+        print(err)  # noqa: T201
 
     @rx.event
     def on_load(self):
@@ -156,7 +157,7 @@ def index() -> rx.Component:
                 rx.divider(),
                 transcript(),
             ),
-            style={"width": "100%", "> *": {"width": "100%"}},
+            style=rx.Style({"width": "100%", "> *": {"width": "100%"}}),
         ),
         size="2",
         margin_y="2em",
