@@ -30,6 +30,7 @@ jobs:
     needs: publish
     env:
       HAS_REFLEX_AUTH_TOKEN: ${{ secrets.REFLEX_AUTH_TOKEN != '' }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@master
       - name: Set up Python 3.12
